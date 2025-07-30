@@ -14,9 +14,10 @@
 
 "Implementation of py_wheel rule"
 
+load(":py_info.bzl", "PyInfo")
 load(":py_package.bzl", "py_package_lib")
-load(":py_wheel_normalize_pep440.bzl", "normalize_pep440")
 load(":stamp.bzl", "is_stamping_enabled")
+load(":version.bzl", "version")
 
 PyWheelInfo = provider(
     doc = "Information about a wheel produced by `py_wheel`",
@@ -305,11 +306,11 @@ def _input_file_to_arg(input_file):
 def _py_wheel_impl(ctx):
     abi = _replace_make_variables(ctx.attr.abi, ctx)
     python_tag = _replace_make_variables(ctx.attr.python_tag, ctx)
-    version = _replace_make_variables(ctx.attr.version, ctx)
+    version_str = _replace_make_variables(ctx.attr.version, ctx)
 
     filename_segments = [
         _escape_filename_distribution_name(ctx.attr.distribution),
-        normalize_pep440(version),
+        version.normalize(version_str),
         _escape_filename_segment(python_tag),
         _escape_filename_segment(abi),
         _escape_filename_segment(ctx.attr.platform),
@@ -319,8 +320,13 @@ def _py_wheel_impl(ctx):
 
     name_file = ctx.actions.declare_file(ctx.label.name + ".name")
 
+    direct_pyi_files = []
+    for dep in ctx.attr.deps:
+        if PyInfo in dep:
+            direct_pyi_files.extend(dep[PyInfo].direct_pyi_files.to_list())
+
     inputs_to_package = depset(
-        direct = ctx.files.deps,
+        direct = ctx.files.deps + direct_pyi_files,
     )
 
     # Inputs to this rule which are not to be packaged.
@@ -337,7 +343,7 @@ def _py_wheel_impl(ctx):
 
     args = ctx.actions.args()
     args.add("--name", ctx.attr.distribution)
-    args.add("--version", version)
+    args.add("--version", version_str)
     args.add("--python_tag", python_tag)
     args.add("--abi", abi)
     args.add("--platform", ctx.attr.platform)
@@ -474,7 +480,7 @@ def _py_wheel_impl(ctx):
         args.add("--no_compress")
 
     for target, filename in ctx.attr.extra_distinfo_files.items():
-        target_files = target.files.to_list()
+        target_files = target[DefaultInfo].files.to_list()
         if len(target_files) != 1:
             fail(
                 "Multi-file target listed in extra_distinfo_files %s",
@@ -487,7 +493,7 @@ def _py_wheel_impl(ctx):
         )
 
     for target, filename in ctx.attr.data_files.items():
-        target_files = target.files.to_list()
+        target_files = target[DefaultInfo].files.to_list()
         if len(target_files) != 1:
             fail(
                 "Multi-file target listed in data_files %s",
@@ -514,6 +520,9 @@ def _py_wheel_impl(ctx):
         outputs = [outfile, name_file],
         arguments = [args],
         executable = ctx.executable._wheelmaker,
+        # The default shell env is used to better support toolchains that look
+        # up python at runtime using PATH.
+        use_default_shell_env = True,
         progress_message = "Building wheel {}".format(ctx.label),
     )
     return [

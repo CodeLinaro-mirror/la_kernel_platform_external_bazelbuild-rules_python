@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import pprint
 import sys
 import unittest
 
@@ -18,9 +19,26 @@ class PythonToolchainTest(unittest.TestCase):
         settings = json.loads(pathlib.Path(settings_path).read_text())
 
         expected = "python_{}".format(expect_version.replace(".", "_"))
-        self.assertIn(expected, settings["toolchain_label"], str(settings))
+        msg = (
+            "Expected toolchain not found\n"
+            + f"Expected toolchain label to contain: {expected}\n"
+            + "Actual build settings:\n"
+            + pprint.pformat(settings)
+        )
+        self.assertIn(expected, settings["toolchain_label"], msg)
 
-        actual = "{v.major}.{v.minor}.{v.micro}".format(v=sys.version_info)
+        if sys.version_info.releaselevel == "final":
+            actual = "{v.major}.{v.minor}.{v.micro}".format(v=sys.version_info)
+        elif sys.version_info.releaselevel in ["beta"]:
+            actual = (
+                "{v.major}.{v.minor}.{v.micro}{v.releaselevel[0]}{v.serial}".format(
+                    v=sys.version_info
+                )
+            )
+        else:
+            raise NotImplementedError(
+                "Unsupported release level, please update the test"
+            )
         self.assertEqual(actual, expect_version)
 
 
