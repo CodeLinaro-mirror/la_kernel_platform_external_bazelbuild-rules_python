@@ -68,7 +68,8 @@ def _test_bzlmod_aliases(env):
         aliases = {
             "bar-baz": {
                 whl_config_setting(
-                    version = "3.2",
+                    # Add one with micro version to mimic construction in the extension
+                    version = "3.2.2",
                     config_setting = "//:my_config_setting",
                 ): "pypi_32_bar_baz",
                 whl_config_setting(
@@ -83,10 +84,10 @@ def _test_bzlmod_aliases(env):
                     filename = "foo-0.0.0-py3-none-any.whl",
                 ): "filename_repo",
                 whl_config_setting(
-                    version = "3.2",
+                    version = "3.2.2",
                     filename = "foo-0.0.0-py3-none-any.whl",
                     target_platforms = [
-                        "cp32_linux_x86_64",
+                        "cp32.2_linux_x86_64",
                     ],
                 ): "filename_repo_linux_x86_64",
             },
@@ -117,7 +118,7 @@ pkg_aliases(
         whl_config_setting(
             filename = "foo-0.0.0-py3-none-any.whl",
             target_platforms = ("cp32_linux_x86_64",),
-            version = "3.2",
+            version = "3.2.2",
         ): "filename_repo_linux_x86_64",
     },
     extra_aliases = ["foo"],
@@ -341,7 +342,7 @@ def _test_sdist(env):
             env,
             filename = "foo-0.0.1" + ext,
             python_version = "3.2",
-            want = [":is_cp3.2_sdist"],
+            want = [":is_cp32_sdist"],
         )
 
     ext = ".zip"
@@ -354,8 +355,8 @@ def _test_sdist(env):
             "linux_x86_64",
         ],
         want = [
-            ":is_cp3.2_sdist_linux_aarch64",
-            ":is_cp3.2_sdist_linux_x86_64",
+            ":is_cp32_sdist_linux_aarch64",
+            ":is_cp32_sdist_linux_x86_64",
         ],
     )
 
@@ -367,7 +368,7 @@ def _test_py2_py3_none_any(env):
         filename = "foo-0.0.1-py2.py3-none-any.whl",
         python_version = "3.2",
         want = [
-            ":is_cp3.2_py_none_any",
+            ":is_cp32_py_none_any",
         ],
     )
 
@@ -378,7 +379,7 @@ def _test_py2_py3_none_any(env):
         target_platforms = [
             "osx_x86_64",
         ],
-        want = [":is_cp3.2_py_none_any_osx_x86_64"],
+        want = [":is_cp32_py_none_any_osx_x86_64"],
     )
 
 _tests.append(_test_py2_py3_none_any)
@@ -388,7 +389,7 @@ def _test_py3_none_any(env):
         env,
         filename = "foo-0.0.1-py3-none-any.whl",
         python_version = "3.1",
-        want = [":is_cp3.1_py3_none_any"],
+        want = [":is_cp31_py3_none_any"],
     )
 
     _test_config_settings(
@@ -396,7 +397,7 @@ def _test_py3_none_any(env):
         filename = "foo-0.0.1-py3-none-any.whl",
         python_version = "3.1",
         target_platforms = ["linux_x86_64"],
-        want = [":is_cp3.1_py3_none_any_linux_x86_64"],
+        want = [":is_cp31_py3_none_any_linux_x86_64"],
     )
 
 _tests.append(_test_py3_none_any)
@@ -412,13 +413,9 @@ def _test_py3_none_macosx_10_9_universal2(env):
         ],
         want = [],
         want_versions = {
-            ":is_cp3.1_py3_none_osx_aarch64_universal2": {
-                (10, 9): ":is_cp3.1_py3_none_osx_10_9_aarch64_universal2",
-                (11, 0): ":is_cp3.1_py3_none_osx_11_0_aarch64_universal2",
-            },
-            ":is_cp3.1_py3_none_osx_x86_64_universal2": {
-                (10, 9): ":is_cp3.1_py3_none_osx_10_9_x86_64_universal2",
-                (11, 0): ":is_cp3.1_py3_none_osx_11_0_x86_64_universal2",
+            ":is_cp31_py3_none_osx_universal2": {
+                (10, 9): ":is_cp31_py3_none_osx_10_9_universal2",
+                (11, 0): ":is_cp31_py3_none_osx_11_0_universal2",
             },
         },
     )
@@ -430,7 +427,7 @@ def _test_cp37_abi3_linux_x86_64(env):
         env,
         filename = "foo-0.0.1-cp37-abi3-linux_x86_64.whl",
         python_version = "3.7",
-        want = [":is_cp3.7_cp3x_abi3_linux_x86_64"],
+        want = [":is_cp37_abi3_linux_x86_64"],
     )
 
 _tests.append(_test_cp37_abi3_linux_x86_64)
@@ -440,7 +437,7 @@ def _test_cp37_abi3_windows_x86_64(env):
         env,
         filename = "foo-0.0.1-cp37-abi3-windows_x86_64.whl",
         python_version = "3.7",
-        want = [":is_cp3.7_cp3x_abi3_windows_x86_64"],
+        want = [":is_cp37_abi3_windows_x86_64"],
     )
 
 _tests.append(_test_cp37_abi3_windows_x86_64)
@@ -457,9 +454,9 @@ def _test_cp37_abi3_manylinux_2_17_x86_64(env):
         ],
         want = [],
         want_versions = {
-            ":is_cp3.7_cp3x_abi3_manylinux_x86_64": {
-                (2, 17): ":is_cp3.7_cp3x_abi3_manylinux_2_17_x86_64",
-                (2, 18): ":is_cp3.7_cp3x_abi3_manylinux_2_18_x86_64",
+            ":is_cp37_abi3_manylinux_x86_64": {
+                (2, 17): ":is_cp37_abi3_manylinux_2_17_x86_64",
+                (2, 18): ":is_cp37_abi3_manylinux_2_18_x86_64",
             },
         },
     )
@@ -482,12 +479,12 @@ def _test_cp37_abi3_manylinux_2_17_musllinux_1_1_aarch64(env):
         ],
         want = [],
         want_versions = {
-            ":is_cp3.7_cp3x_cp_manylinux_aarch64": {
-                (2, 17): ":is_cp3.7_cp3x_cp_manylinux_2_17_aarch64",
-                (2, 18): ":is_cp3.7_cp3x_cp_manylinux_2_18_aarch64",
+            ":is_cp37_cp37_manylinux_aarch64": {
+                (2, 17): ":is_cp37_cp37_manylinux_2_17_aarch64",
+                (2, 18): ":is_cp37_cp37_manylinux_2_18_aarch64",
             },
-            ":is_cp3.7_cp3x_cp_musllinux_aarch64": {
-                (1, 1): ":is_cp3.7_cp3x_cp_musllinux_1_1_aarch64",
+            ":is_cp37_cp37_musllinux_aarch64": {
+                (1, 1): ":is_cp37_cp37_musllinux_1_1_aarch64",
             },
         },
     )

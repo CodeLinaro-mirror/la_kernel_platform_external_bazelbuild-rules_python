@@ -76,8 +76,8 @@ _RULE_DEPS = [
     ),
     (
         "pypi__setuptools",
-        "https://files.pythonhosted.org/packages/de/88/70c5767a0e43eb4451c2200f07d042a4bcd7639276003a9c54a68cfcc1f8/setuptools-70.0.0-py3-none-any.whl",
-        "54faa7f2e8d2d11bcd2c07bed282eef1046b5c080d1c32add737d7b5817b1ad4",
+        "https://files.pythonhosted.org/packages/90/99/158ad0609729111163fc1f674a5a42f2605371a4cf036d0441070e2f7455/setuptools-78.1.1-py3-none-any.whl",
+        "c3a9c4211ff4c309edb8b8c4f1cbfa7ae324c4ba9f91ff254e3d305b9fd54561",
     ),
     (
         "pypi__tomli",
@@ -100,7 +100,7 @@ _RULE_DEPS = [
 _GENERIC_WHEEL = """\
 package(default_visibility = ["//visibility:public"])
 
-load("@rules_python//python:defs.bzl", "py_library")
+load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python/private:glob_excludes.bzl", "glob_excludes")
 
 py_library(
@@ -124,6 +124,13 @@ py_library(
 
 # Collate all the repository names so they can be easily consumed
 all_repo_names = [name for (name, _, _) in _RULE_DEPS]
+record_files = {
+    name: Label("@{}//:{}.dist-info/RECORD".format(
+        name,
+        url.rpartition("/")[-1].partition("-py3-none")[0],
+    ))
+    for (name, url, _) in _RULE_DEPS
+}
 
 def pypi_deps():
     """
