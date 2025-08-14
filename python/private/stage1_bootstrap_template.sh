@@ -228,6 +228,9 @@ EOF
   if [[ ! -e "$venv/pyvenv.cfg" ]]; then
     ln -s "$runfiles_venv/pyvenv.cfg" "$venv/pyvenv.cfg"
   fi
+  # ANDROID: b/438286001 Add site packages to PYTHONPATH because the hermetic
+  # Python does not support site packages.
+  export PYTHONPATH=${PYTHONPATH}:$venv_site_packages
 else
   use_exec=1
 fi

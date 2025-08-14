@@ -379,6 +379,10 @@ def main():
     print_verbose("initial environ:", mapping=os.environ)
     print_verbose("initial sys.path:", values=sys.path)
 
+    # ANDROID: b/438286001 manually import _bazel_site_init to import
+    # dependencies because our hermetic Python does not support site packages
+    import _bazel_site_init
+
     if VENV_SITE_PACKAGES:
         site_packages = os.path.join(sys.prefix, VENV_SITE_PACKAGES)
         if site_packages not in sys.path and os.path.exists(site_packages):
