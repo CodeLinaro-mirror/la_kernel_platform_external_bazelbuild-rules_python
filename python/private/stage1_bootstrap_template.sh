@@ -229,8 +229,13 @@ EOF
     ln -s "$runfiles_venv/pyvenv.cfg" "$venv/pyvenv.cfg"
   fi
   # ANDROID: b/438286001 Add site packages to PYTHONPATH because the hermetic
-  # Python does not support site packages.
-  export PYTHONPATH=${PYTHONPATH}:$venv_site_packages
+  # Python does not support site packages. To support recursive Python
+  # invocations (e.g. Kleaf integration test), clear the previous
+  # venv_site_packages by recording the OLDPYTHONPATH variable. If both
+  # OLDPYTHONPATH and PYTHONPATH are empty, still populate OLDPYTHONPATH with a
+  # harmless single colon so it doesn't get overridden in the inner invocation.
+  export OLDPYTHONPATH="${OLDPYTHONPATH:-${PYTHONPATH:-:}}"
+  export PYTHONPATH=${OLDPYTHONPATH}:$venv_site_packages
 else
   use_exec=1
 fi
