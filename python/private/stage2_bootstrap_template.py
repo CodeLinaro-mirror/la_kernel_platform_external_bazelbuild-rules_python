@@ -379,9 +379,14 @@ def main():
     print_verbose("initial environ:", mapping=os.environ)
     print_verbose("initial sys.path:", values=sys.path)
 
-    # ANDROID: b/438286001 manually import _bazel_site_init to import
-    # dependencies because our hermetic Python does not support site packages
-    import _bazel_site_init
+    # ANDROID: b/438286001, b/493138451 - manually set sys.path to let site-packages
+    # to be loaded properly. Our hermetic Python does not support site packages
+    # Example sys.executable:
+    #    /tmp/Bazel.runfiles_brv9b_l2/runfiles/_main/<package>/_<target>.venv/bin/py3-cmd
+    # Then set sys.prefix to /tmp/Bazel.runfiles_brv9b_l2/runfiles/_main/<package>/_<target>.venv/ .
+    import pathlib
+    sys.prefix = pathlib.Path(sys.executable).parent.parent
+    print_verbose(f"new sys.prefix:", sys.prefix)
 
     if VENV_SITE_PACKAGES:
         site_packages = os.path.join(sys.prefix, VENV_SITE_PACKAGES)
@@ -398,6 +403,10 @@ def main():
             import site
 
             site.addsitedir(site_packages)
+
+    # ANDROID: b/438286001 manually import _bazel_site_init to import
+    # dependencies because our hermetic Python does not support site packages
+    import _bazel_site_init
 
     main_rel_path = None
     # todo: things happen to work because find_runfiles_root
