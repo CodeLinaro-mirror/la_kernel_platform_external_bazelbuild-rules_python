@@ -109,7 +109,11 @@ def _get_toolchain_unix_cflags(rctx, python_interpreter, logger = None):
     stdout = pypi_repo_utils.execute_checked_stdout(
         rctx,
         op = "GetPythonVersionForUnixCflags",
-        python = python_interpreter,
+        # python_interpreter by default points to a symlink, however when using bazel in vendor mode,
+        # and the vendored directory moves around, the execution of python fails, as it's getting confused
+        # where it's running from. More to the fact that we are executing it in isolated mode "-I", which
+        # results in PYTHONHOME being ignored. The solution is to run python from it's real directory.
+        python = python_interpreter.realpath,
         arguments = [
             # Run the interpreter in isolated mode, this options implies -E, -P and -s.
             # Ensures environment variables are ignored that are set in userspace, such as PYTHONPATH,
@@ -198,6 +202,37 @@ def _parse_optional_attrs(rctx, args, extra_pip_args = None):
 
     return args
 
+def _get_python_home(rctx, python_interpreter, logger = None):
+    """Get the PYTHONHOME directory from the selected python interpretter
+
+    Args:
+        rctx (repository_ctx): The repository context.
+        python_interpreter (path): The resolved python interpreter.
+        logger: Optional logger to use for operations.
+    Returns:
+        String of PYTHONHOME directory.
+    """
+
+    return pypi_repo_utils.execute_checked_stdout(
+        rctx,
+        op = "GetPythonHome",
+        # python_interpreter by default points to a symlink, however when using bazel in vendor mode,
+        # and the vendored directory moves around, the execution of python fails, as it's getting confused
+        # where it's running from. More to the fact that we are executing it in isolated mode "-I", which
+        # results in PYTHONHOME being ignored. The solution is to run python from it's real directory.
+        python = python_interpreter.realpath,
+        arguments = [
+            # Run the interpreter in isolated mode, this options implies -E, -P and -s.
+            # Ensures environment variables are ignored that are set in userspace, such as PYTHONPATH,
+            # which may interfere with this invocation.
+            "-I",
+            "-c",
+            "import sys; print(f'{sys.prefix}', end='')",
+        ],
+        srcs = [],
+        logger = logger,
+    )
+
 def _create_repository_execution_environment(rctx, python_interpreter, logger = None):
     """Create a environment dictionary for processes we spawn with rctx.execute.
 
@@ -210,6 +245,7 @@ def _create_repository_execution_environment(rctx, python_interpreter, logger = 
     """
 
     env = {
+        "PYTHONHOME": _get_python_home(rctx, python_interpreter, logger),
         "PYTHONPATH": pypi_repo_utils.construct_pythonpath(
             rctx,
             entries = rctx.attr._python_path_entries,
@@ -248,7 +284,9 @@ def _whl_library_impl(rctx):
     environment = _create_repository_execution_environment(rctx, python_interpreter, logger = logger)
 
     whl_path = None
+    sdist_filename = None
     if rctx.attr.whl_file:
+        rctx.watch(rctx.attr.whl_file)
         whl_path = rctx.path(rctx.attr.whl_file)
 
         # Simulate the behaviour where the whl is present in the current directory.
@@ -276,6 +314,8 @@ def _whl_library_impl(rctx):
         if filename.endswith(".whl"):
             whl_path = rctx.path(filename)
         else:
+            sdist_filename = filename
+
             # It is an sdist and we need to tell PyPI to use a file in this directory
             # and, allow getting build dependencies from PYTHONPATH, which we
             # setup in this repository rule, but still download any necessary
@@ -329,7 +369,12 @@ def _whl_library_impl(rctx):
                 timeout = rctx.attr.timeout,
             )
 
-    if rp_config.enable_pipstar:
+    # NOTE @aignas 2025-09-28: if someone has an old vendored file that does not have the
+    # dep_template set or the packages is not set either, we should still not break, best to
+    # disable pipstar for that particular case.
+    #
+    # Remove non-pipstar and config_load check when we release rules_python 2.
+    if rp_config.enable_pipstar and rctx.attr.config_load:
         pypi_repo_utils.execute_checked(
             rctx,
             op = "whl_library.ExtractWheel({}, {})".format(rctx.attr.name, whl_path),
@@ -381,7 +426,11 @@ def _whl_library_impl(rctx):
 
         build_file_contents = generate_whl_library_build_bazel(
             name = whl_path.basename,
-            dep_template = rctx.attr.dep_template or "@{}{{name}}//:{{target}}".format(rctx.attr.repo_prefix),
+            sdist_filename = sdist_filename,
+            dep_template = rctx.attr.dep_template or "@{}{{name}}//:{{target}}".format(
+                rctx.attr.repo_prefix,
+            ),
+            config_load = rctx.attr.config_load,
             entry_points = entry_points,
             metadata_name = metadata.name,
             metadata_version = metadata.version,
@@ -454,6 +503,7 @@ def _whl_library_impl(rctx):
 
         build_file_contents = generate_whl_library_build_bazel(
             name = whl_path.basename,
+            sdist_filename = sdist_filename,
             dep_template = rctx.attr.dep_template or "@{}{{name}}//:{{target}}".format(rctx.attr.repo_prefix),
             entry_points = entry_points,
             # TODO @aignas 2025-05-17: maybe have a build flag for this instead
@@ -471,8 +521,26 @@ def _whl_library_impl(rctx):
             ],
         )
 
-    rctx.file("BUILD.bazel", build_file_contents)
+    # Delete these in case the wheel had them. They generally don't cause
+    # a problem, but let's avoid the chance of that happening.
+    rctx.file("WORKSPACE")
+    rctx.file("WORKSPACE.bazel")
+    rctx.file("MODULE.bazel")
+    rctx.file("REPO.bazel")
 
+    paths = list(rctx.path(".").readdir())
+    for _ in range(10000000):
+        if not paths:
+            break
+        path = paths.pop()
+
+        # BUILD files interfere with globbing and Bazel package boundaries.
+        if path.basename in ("BUILD", "BUILD.bazel"):
+            rctx.delete(path)
+        elif path.is_dir:
+            paths.extend(path.readdir())
+
+    rctx.file("BUILD.bazel", build_file_contents)
     return
 
 def _generate_entry_point_contents(
@@ -512,11 +580,17 @@ whl_library_attrs = dict({
         ),
         allow_files = True,
     ),
+    "config_load": attr.string(
+        doc = "The load location for configuration for pipstar.",
+    ),
     "dep_template": attr.string(
         doc = """
 The dep template to use for referencing the dependencies. It should have `{name}`
 and `{target}` tokens that will be replaced with the normalized distribution name
 and the target that we need respectively.
+
+For example if your whl depends on `numpy` and your Python package repo is named
+`pip` so that you would normally do `@pip//numpy`, then this should be: `@pip//{name}`.
 """,
     ),
     "filename": attr.string(
@@ -555,11 +629,29 @@ attr makes `extra_pip_args` and `download_only` ignored.""",
         doc = "The whl file that should be used instead of downloading or building the whl.",
     ),
     "whl_patches": attr.label_keyed_string_dict(
-        doc = """a label-keyed-string dict that has
-            json.encode(struct([whl_file], patch_strip]) as values. This
-            is to maintain flexibility and correct bzlmod extension interface
-            until we have a better way to define whl_library and move whl
-            patching to a separate place. INTERNAL USE ONLY.""",
+        doc = """
+A label-keyed-string dict with patch files as keys and json-strings as values.
+
+The keys are labels to the patch file to apply.
+
+The values describe what to apply the patch to and how to apply it.
+It is encoded as `json.encode(struct([whls], patch_strip])`,
+where `whls` is a `list[str`] of wheel filenames, and `patch_strip`
+is a number.
+
+So it will look something like this:
+```
+"//path/to/package:my.patch": json.encode(struct(
+    whls = ["something-2.7.1-py3-none-any.whl"],
+    patch_strip = 1,
+)),
+```
+The patch is applied within the scope of the .whl file.
+I.e. you should create the patch from the same place you unziped the wheel.
+
+
+This is to maintain flexibility and correct bzlmod extension interface until we have a better
+way to define whl_library and move whl patching to a separate place. INTERNAL USE ONLY.""",
     ),
     "_python_path_entries": attr.label_list(
         # Get the root directory of these rules and keep them as a default attribute

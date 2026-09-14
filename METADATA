@@ -7,14 +7,14 @@ description: "A repository of Starlark implementation of Python rules in Bazel"
 third_party {
   license_type: NOTICE
   last_upgrade_date {
-    year: 2025
-    month: 7
-    day: 30
+    year: 2026
+    month: 9
+    day: 14
   }
   identifier {
     type: "Git"
     value: "https://github.com/bazelbuild/rules_python"
-    version: "18d0d297aa6949f1eb61db963854d5d6918a5a48"
-    closest_version: "1.5.1"
+    version: "d3ea893113375b0c0f788c3315d8a8f488d69af6"
+    closest_version: "1.7.0"
   }
 }

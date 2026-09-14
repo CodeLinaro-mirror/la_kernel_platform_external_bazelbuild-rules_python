@@ -17,21 +17,31 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//python:py_binary.bzl", "py_binary")
 load("//python:py_library.bzl", "py_library")
-load("//python/private:glob_excludes.bzl", "glob_excludes")
 load("//python/private:normalize_name.bzl", "normalize_name")
 load(":env_marker_setting.bzl", "env_marker_setting")
 load(
     ":labels.bzl",
     "DATA_LABEL",
     "DIST_INFO_LABEL",
+    "EXTRACTED_WHEEL_FILES",
     "PY_LIBRARY_IMPL_LABEL",
     "PY_LIBRARY_PUBLIC_LABEL",
     "WHEEL_ENTRY_POINT_PREFIX",
     "WHEEL_FILE_IMPL_LABEL",
     "WHEEL_FILE_PUBLIC_LABEL",
 )
-load(":namespace_pkgs.bzl", "create_inits")
+load(":namespace_pkgs.bzl", _create_inits = "create_inits")
 load(":pep508_deps.bzl", "deps")
+
+# Files that are special to the Bazel processing of things.
+_BAZEL_REPO_FILE_GLOBS = [
+    "BUILD",
+    "BUILD.bazel",
+    "REPO.bazel",
+    "WORKSPACE",
+    "WORKSPACE",
+    "WORKSPACE.bazel",
+]
 
 def whl_library_targets_from_requires(
         *,
@@ -97,14 +107,12 @@ def whl_library_targets(
         *,
         name,
         dep_template,
+        sdist_filename = None,
         data_exclude = [],
         srcs_exclude = [],
         tags = [],
-        filegroups = {
-            DIST_INFO_LABEL: ["site-packages/*.dist-info/**"],
-            DATA_LABEL: ["data/**"],
-        },
         dependencies = [],
+        filegroups = None,
         dependencies_by_platform = {},
         dependencies_with_markers = {},
         group_deps = [],
@@ -120,6 +128,7 @@ def whl_library_targets(
             py_binary = py_binary,
             py_library = py_library,
             env_marker_setting = env_marker_setting,
+            create_inits = _create_inits,
         )):
     """Create all of the whl_library targets.
 
@@ -128,14 +137,16 @@ def whl_library_targets(
             filegroup. This may be also parsed to generate extra metadata.
         dep_template: {type}`str` The dep_template to use for dependency
             interpolation.
+        sdist_filename: {type}`str | None` If the wheel was built from an sdist,
+            the filename of the sdist.
         tags: {type}`list[str]` The tags set on the `py_library`.
         dependencies: {type}`list[str]` A list of dependencies.
         dependencies_by_platform: {type}`dict[str, list[str]]` A list of
             dependencies by platform key.
         dependencies_with_markers: {type}`dict[str, str]` A marker to evaluate
             in order for the dep to be included.
-        filegroups: {type}`dict[str, list[str]]` A dictionary of the target
-            names and the glob matches.
+        filegroups: {type}`dict[str, list[str]] | None` A dictionary of the target
+            names and the glob matches. If `None`, defaults will be used.
         group_name: {type}`str` name of the dependency group (if any) which
             contains this library. If set, this library will behave as a shim
             to group implementation rules which will provide simultaneously
@@ -168,10 +179,28 @@ def whl_library_targets(
     tags = sorted(tags)
     data = [] + data
 
-    for filegroup_name, glob in filegroups.items():
+    if filegroups == None:
+        filegroups = {
+            EXTRACTED_WHEEL_FILES: dict(
+                include = ["**"],
+                exclude = (
+                    _BAZEL_REPO_FILE_GLOBS +
+                    [sdist_filename] if sdist_filename else []
+                ),
+            ),
+            DIST_INFO_LABEL: dict(
+                include = ["site-packages/*.dist-info/**"],
+            ),
+            DATA_LABEL: dict(
+                include = ["data/**"],
+            ),
+        }
+
+    for filegroup_name, glob_kwargs in filegroups.items():
+        glob_kwargs = {"allow_empty": True} | glob_kwargs
         native.filegroup(
             name = filegroup_name,
-            srcs = native.glob(glob, allow_empty = True),
+            srcs = native.glob(**glob_kwargs),
             visibility = ["//visibility:public"],
         )
 
@@ -244,13 +273,23 @@ def whl_library_targets(
     # implementation.
     if group_name and "//:" in dep_template:
         # This is the legacy behaviour where the group library is outside the hub repo
+        #
+        # It is expected to disappear when we drop WORKSPACE or drop the vendoring of
+        # pip_parse `requirements.bzl` in WORKSPACE. The alternative would be to add
+        # another argument to the macro, but it is already full of arguments.
         label_tmpl = dep_template.format(
-            name = "_groups",
+            name = "_config",
             target = normalize_name(group_name) + "_{}",
+        ).replace(
+            "//:",
+            "//_groups:",
         )
         impl_vis = [dep_template.format(
-            name = "_groups",
+            name = "_config",
             target = "__pkg__",
+        ).replace(
+            "//:",
+            "//_groups:",
         )]
 
         native.alias(
@@ -285,13 +324,6 @@ def whl_library_targets(
                 deps_by_platform = dependencies_by_platform,
                 deps_conditional = deps_conditional,
                 tmpl = dep_template.format(name = "{}", target = WHEEL_FILE_PUBLIC_LABEL),
-                # NOTE @aignas 2024-10-28: Actually, `select` is not part of
-                # `native`, but in order to support bazel 6.4 in unit tests, I
-                # have to somehow pass the `select` implementation in the unit
-                # tests and I chose this to be routed through the `native`
-                # struct. So, tests` will be successful in `getattr` and the
-                # real code will use the fallback provided here.
-                select = getattr(native, "select", select),
             ),
             visibility = impl_vis,
         )
@@ -316,7 +348,7 @@ def whl_library_targets(
             # of generated files produced when wheels are installed. The file is ignored to avoid
             # Bazel caching issues.
             "**/*.dist-info/RECORD",
-        ] + glob_excludes.version_dependent_exclusions()
+        ]
         for item in data_exclude:
             if item not in _data_exclude:
                 _data_exclude.append(item)
@@ -332,9 +364,9 @@ def whl_library_targets(
         )
 
         if not enable_implicit_namespace_pkgs:
-            srcs = srcs + getattr(native, "select", select)({
+            srcs = srcs + select({
                 Label("//python/config_settings:is_venvs_site_packages"): [],
-                "//conditions:default": create_inits(
+                "//conditions:default": rules.create_inits(
                     srcs = srcs + data + pyi_srcs,
                     ignored_dirnames = [],  # If you need to ignore certain folders, you can patch rules_python here to do so.
                     root = "site-packages",
@@ -354,7 +386,6 @@ def whl_library_targets(
                 deps_by_platform = dependencies_by_platform,
                 deps_conditional = deps_conditional,
                 tmpl = dep_template.format(name = "{}", target = PY_LIBRARY_PUBLIC_LABEL),
-                select = getattr(native, "select", select),
             ),
             tags = tags,
             visibility = impl_vis,
@@ -425,7 +456,7 @@ def _plat_label(plat):
     else:
         return ":is_" + plat.replace("cp3", "python_3.")
 
-def _deps(deps, deps_by_platform, deps_conditional, tmpl, select = select):
+def _deps(deps, deps_by_platform, deps_conditional, tmpl):
     deps = [tmpl.format(d) for d in sorted(deps)]
 
     for dep, setting in deps_conditional.items():

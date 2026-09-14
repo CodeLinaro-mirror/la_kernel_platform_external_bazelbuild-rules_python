@@ -14,9 +14,12 @@
 
 "Implementation of py_wheel rule"
 
+load(":attributes.bzl", "CONFIG_SETTINGS_ATTR", "apply_config_settings_attr")
 load(":py_info.bzl", "PyInfo")
 load(":py_package.bzl", "py_package_lib")
+load(":rule_builders.bzl", "ruleb")
 load(":stamp.bzl", "is_stamping_enabled")
+load(":transition_labels.bzl", "TRANSITION_LABELS")
 load(":version.bzl", "version")
 
 PyWheelInfo = provider(
@@ -217,7 +220,15 @@ _other_attrs = {
     ),
     "strip_path_prefixes": attr.string_list(
         default = [],
-        doc = "path prefixes to strip from files added to the generated package",
+        doc = """\
+Path prefixes to strip from files added to the generated package.
+Prefixes are checked **in order** and only the **first match** will be used.
+
+For example:
++ `["foo", "foo/bar/baz"]` will strip `"foo/bar/baz/file.py"` to `"bar/baz/file.py"`
++ `["foo/bar/baz", "foo"]` will strip `"foo/bar/baz/file.py"` to `"file.py"` and
+  `"foo/file2.py"` to `"file2.py"`
+""",
     ),
     "summary": attr.string(
         doc = "A one-line summary of what the distribution does",
@@ -569,10 +580,15 @@ tries to locate `.runfiles` directory which is not packaged in the wheel.
         _requirement_attrs,
         _entrypoint_attrs,
         _other_attrs,
+        CONFIG_SETTINGS_ATTR,
     ),
 )
 
-py_wheel = rule(
+def _transition_wheel_impl(settings, attr):
+    """Transition for py_wheel."""
+    return apply_config_settings_attr(dict(settings), attr)
+
+py_wheel = ruleb.Rule(
     implementation = py_wheel_lib.implementation,
     doc = """\
 Internal rule used by the [py_wheel macro](#py_wheel).
@@ -582,4 +598,9 @@ For example, a `bazel query` for a user's `py_wheel` macro expands to `py_wheel`
 in the way they expect.
 """,
     attrs = py_wheel_lib.attrs,
-)
+    cfg = transition(
+        implementation = _transition_wheel_impl,
+        inputs = TRANSITION_LABELS,
+        outputs = TRANSITION_LABELS,
+    ),
+).build()

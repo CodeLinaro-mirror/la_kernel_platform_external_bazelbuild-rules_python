@@ -5,17 +5,17 @@ module(
 )
 
 bazel_dep(name = "bazel_features", version = "1.21.0")
-bazel_dep(name = "bazel_skylib", version = "1.7.1")
-bazel_dep(name = "rules_cc", version = "0.0.16")
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "rules_cc", version = "0.1.5")
 bazel_dep(name = "platforms", version = "0.0.11")
 
 # Those are loaded only when using py_proto_library
 # Use py_proto_library directly from protobuf repository
 bazel_dep(name = "protobuf", version = "29.0-rc2", repo_name = "com_google_protobuf")
 
-internal_deps = use_extension("//python/private:internal_deps.bzl", "internal_deps")
+rules_python_config = use_extension("//python/extensions:config.bzl", "config")
 use_repo(
-    internal_deps,
+    rules_python_config,
     "pypi__build",
     "pypi__click",
     "pypi__colorama",
@@ -42,8 +42,12 @@ python = use_extension("//python/extensions:python.bzl", "python")
 # NOTE: This is not a stable version. It is provided for convenience, but will
 # change frequently to track the most recent Python version.
 # NOTE: The root module can override this.
+# NOTE: There must be a corresponding `python.toolchain()` call for the version
+# specified here.
+python.defaults(
+    python_version = "3.11",
+)
 python.toolchain(
-    is_default = True,
     python_version = "3.11",
 )
 use_repo(
@@ -60,11 +64,143 @@ register_toolchains("@pythons_hub//:all")
 # Install twine for our own runfiles wheel publishing and allow bzlmod users to use it.
 
 pip = use_extension("//python/extensions:pip.bzl", "pip")
+
+# NOTE @aignas 2025-07-06: we define these platforms to keep backwards compatibility with the
+# current `experimental_index_url` implementation. Whilst we stabilize the API this list may be
+# updated with a mention in the CHANGELOG.
+[
+    pip.default(
+        arch_name = cpu,
+        config_settings = [
+            "@platforms//cpu:{}".format(cpu),
+            "@platforms//os:linux",
+            "//python/config_settings:_is_py_freethreaded_{}".format(
+                "yes" if freethreaded else "no",
+            ),
+        ],
+        env = {"platform_version": "0"},
+        marker = "python_version >= '3.13'" if freethreaded else "",
+        os_name = "linux",
+        platform = "linux_{}{}".format(cpu, freethreaded),
+        whl_abi_tags = ["cp{major}{minor}t"] if freethreaded else [
+            "abi3",
+            "cp{major}{minor}",
+        ],
+        whl_platform_tags = [
+            "linux_{}".format(cpu),
+            "manylinux_*_{}".format(cpu),
+        ],
+    )
+    for cpu in [
+        "x86_64",
+        "aarch64",
+    ]
+    for freethreaded in [
+        "",
+        "_freethreaded",
+    ]
+]
+
+[
+    pip.default(
+        arch_name = cpu,
+        config_settings = [
+            "@platforms//cpu:{}".format(cpu),
+            "@platforms//os:osx",
+            "//python/config_settings:_is_py_freethreaded_{}".format(
+                "yes" if freethreaded else "no",
+            ),
+        ],
+        # We choose the oldest non-EOL version at the time when we release `rules_python`.
+        # See https://endoflife.date/macos
+        env = {"platform_version": "14.0"},
+        marker = "python_version >= '3.13'" if freethreaded else "",
+        os_name = "osx",
+        platform = "osx_{}{}".format(cpu, freethreaded),
+        whl_abi_tags = ["cp{major}{minor}t"] if freethreaded else [
+            "abi3",
+            "cp{major}{minor}",
+        ],
+        whl_platform_tags = [
+            "macosx_*_{}".format(suffix)
+            for suffix in platform_tag_cpus
+        ],
+    )
+    for cpu, platform_tag_cpus in {
+        "aarch64": [
+            "universal2",
+            "arm64",
+        ],
+        "x86_64": [
+            "universal2",
+            "x86_64",
+        ],
+    }.items()
+    for freethreaded in [
+        "",
+        "_freethreaded",
+    ]
+]
+
+[
+    pip.default(
+        arch_name = cpu,
+        config_settings = [
+            "@platforms//cpu:{}".format(cpu),
+            "@platforms//os:windows",
+            "//python/config_settings:_is_py_freethreaded_{}".format(
+                "yes" if freethreaded else "no",
+            ),
+        ],
+        env = {"platform_version": "0"},
+        marker = "python_version >= '3.13'" if freethreaded else "",
+        os_name = "windows",
+        platform = "windows_{}{}".format(cpu, freethreaded),
+        whl_abi_tags = ["cp{major}{minor}t"] if freethreaded else [
+            "abi3",
+            "cp{major}{minor}",
+        ],
+        whl_platform_tags = whl_platform_tags,
+    )
+    for cpu, whl_platform_tags in {
+        "x86_64": ["win_amd64"],
+    }.items()
+    for freethreaded in [
+        "",
+        "_freethreaded",
+    ]
+]
+
+[
+    pip.default(
+        arch_name = cpu,
+        config_settings = [
+            "@platforms//cpu:{}".format(cpu),
+            "@platforms//os:windows",
+            "//python/config_settings:_is_py_freethreaded_{}".format(
+                "yes" if freethreaded else "no",
+            ),
+        ],
+        env = {"platform_version": "0"},
+        marker = "python_version >= '3.13'" if freethreaded else "python_version >= '3.11'",
+        os_name = "windows",
+        platform = "windows_{}{}".format(cpu, freethreaded),
+        whl_abi_tags = ["cp{major}{minor}t"] if freethreaded else [
+            "abi3",
+            "cp{major}{minor}",
+        ],
+        whl_platform_tags = whl_platform_tags,
+    )
+    for cpu, whl_platform_tags in {
+        "aarch64": ["win_arm64"],
+    }.items()
+    for freethreaded in [
+        "",
+        "_freethreaded",
+    ]
+]
+
 pip.parse(
-    # NOTE @aignas 2024-10-26: We have an integration test that depends on us
-    # being able to build sdists for this hub, so explicitly set this to False.
-    download_only = False,
-    experimental_index_url = "https://pypi.org/simple",
     hub_name = "rules_python_publish_deps",
     python_version = "3.11",
     requirements_by_platform = {
@@ -102,7 +238,24 @@ internal_dev_deps = use_extension(
 use_repo(
     internal_dev_deps,
     "buildkite_config",
+    "implicit_namespace_ns_sub1",
+    "implicit_namespace_ns_sub2",
     "rules_python_runtime_env_tc_info",
+    "somepkg_with_build_files",
+    "whl_with_build_files",
+)
+
+dev_rules_python_config = use_extension(
+    "//python/extensions:config.bzl",
+    "config",
+    dev_dependency = True,
+)
+dev_rules_python_config.add_transition_setting(
+    # Intentionally add a setting already present for testing
+    setting = "//python/config_settings:python_version",
+)
+dev_rules_python_config.add_transition_setting(
+    setting = "//tests/multi_pypi:external_deps_name",
 )
 
 # Add gazelle plugin so that we can run the gazelle example as an e2e integration
@@ -152,21 +305,26 @@ dev_pip = use_extension(
     "pip",
     dev_dependency = True,
 )
-dev_pip.parse(
-    download_only = True,
-    experimental_index_url = "https://pypi.org/simple",
-    hub_name = "dev_pip",
-    parallel_download = False,
-    python_version = "3.11",
-    requirements_lock = "//docs:requirements.txt",
-)
-dev_pip.parse(
-    download_only = True,
-    experimental_index_url = "https://pypi.org/simple",
-    hub_name = "dev_pip",
-    python_version = "3.13",
-    requirements_lock = "//docs:requirements.txt",
-)
+
+[
+    dev_pip.parse(
+        download_only = True,
+        experimental_index_url = "https://pypi.org/simple",
+        hub_name = "dev_pip",
+        parallel_download = False,
+        python_version = python_version,
+        requirements_lock = "//docs:requirements.txt",
+    )
+    for python_version in [
+        "3.9",
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14",
+    ]
+]
+
 dev_pip.parse(
     download_only = True,
     experimental_index_url = "https://pypi.org/simple",
@@ -174,7 +332,17 @@ dev_pip.parse(
     python_version = "3.11",
     requirements_lock = "//examples/wheel:requirements_server.txt",
 )
-use_repo(dev_pip, "dev_pip", "pypiserver")
+dev_pip.parse(
+    hub_name = "pypi_alpha",
+    python_version = "3.11",
+    requirements_lock = "//tests/multi_pypi/alpha:requirements.txt",
+)
+dev_pip.parse(
+    hub_name = "pypi_beta",
+    python_version = "3.11",
+    requirements_lock = "//tests/multi_pypi/beta:requirements.txt",
+)
+use_repo(dev_pip, "dev_pip", "pypi_alpha", "pypi_beta", "pypiserver")
 
 # Bazel integration test setup below
 
